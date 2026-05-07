@@ -345,16 +345,24 @@ cat("Discount factor:          ", discount, "\n")
 states$payoff <- pmax(states$S - states$S_bar, 0)
 
 # print the recap of the payoff ___________________________
-cat("\n=== Task (iii): Floating-Strike Asian Call Payoff ===\n")
+cat("\n Floating-Strike Asian Call Payoff\n")
 cat("Number of terminal paths: ", nrow(states), "\n")
 cat("Minimum payoff:          $", round(min(states$payoff), 4), "\n")
 cat("Maximum payoff:          $", round(max(states$payoff), 4), "\n")
 cat("Mean payoff:             $", round(mean(states$payoff), 4), "\n")
+cat("Median payoff:           $", round(median(states$payoff), 4), "\n")
 cat("Share positive payoffs:   ", round(mean(states$payoff > 0) * 100, 2), "%\n")
 
-# Plot the distribution of the payoff at maturity _________
+# Plot the distribution of the payoff at maturity
 ggplot(states, aes(x = payoff)) +
   geom_histogram(bins = 50, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(xintercept = mean(states$payoff),
+             color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x = mean(states$payoff) + 1,
+           y = Inf, vjust = 2,
+           label = paste0("Mean = $", round(mean(states$payoff), 2)),
+           color = "red", size = 3.5, hjust = 0) +
   labs(
     title = "Distribution of Potential Payoffs at Maturity",
     subtitle = "Unweighted across all terminal paths",
@@ -363,9 +371,16 @@ ggplot(states, aes(x = payoff)) +
   ) +
   theme_minimal()
 
-
-
-head(states)
+# plot the scatter plot of Sn and the payoff
+ggplot(states, aes(x = S, y = payoff)) +
+  geom_point(alpha = 0.01, size = 0.3, color = "steelblue") +
+  labs(
+    title = "Payoff vs Terminal Stock Price",
+    subtitle = "Cloud width shows path dependence: same S_n, different averages",
+    x = "Terminal stock price S_n",
+    y = "Payoff"
+  ) +
+  theme_minimal()
 ```
 
 ## i.v) Weighted Outcome under risk-neutral probability
@@ -377,12 +392,16 @@ Use the weighted probability under the no-arbitrage opportunity assumption.
 # we have each terminal payoff
 values <- states$payoff 
 
-# in order to use backward induction we need to start from maturity and then loops through each eateriation until we reach time 0 (starting point)
+# in order to use backward induction: we need to start from the payoff at maturity and then loops through each eateriation until we reach time 0 (starting point)
+
 for (step in n:1) {
   half   <- length(values) / 2
+  # split the tree in two parts (the part above is all the value that ended with an up and the part below is all the down)
   v_up   <- values[1:half]
   v_down <- values[(half + 1):length(values)]
   values <- discount * (q * v_up + (1 - q) * v_down)
+  # we compute the probability of having the up and the down before discounting them by the period factor
+  # Loop through all the iteration of the tree in order to reach the starting point (unique V0)
 }
 
 V0_b<- values
@@ -391,6 +410,8 @@ cat(" Option price at t = 0 with backward induction: $", round(V0_b,4))
 ```
 
 ```{r option value using direct forward calculation}
+# Control if both model gives the same value:
+
 # find the number of up moves for each path
 states$up_moves <- round((log(states$S / S0) - n * log(d)) / (log(u) - log(d))) 
 
