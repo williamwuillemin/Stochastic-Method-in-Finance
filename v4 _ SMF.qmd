@@ -31,6 +31,7 @@ library(ggplot2)
 
 ```{r}
 getwd()
+setwd("C:/William/University_GitHub/Stochastic Method in Finance/Assignment")
 data <- read_excel("AAPL.xlsx")
 ```
 Added to clean the environment:
@@ -97,8 +98,9 @@ sigma_daily <- sd(returns, na.rm = TRUE) #Calculate the standard deviation, remo
 sigma <- sigma_daily * sqrt(250) #calculate the annualized volatility, given in assignment
 
 #Up and down factors 
-u <- exp(sigma * sqrt(delta_t))  #page 2
+u <- exp(sigma * sqrt(delta_t))     #page 2
 d <- exp(-sigma * sqrt(delta_t))
+
 ```
 
 # ── The binomial tree (matrix format) 
@@ -315,24 +317,27 @@ The forward induction works by recognizing that the cumulative sum $C_t = \sum_{
 
 ## iii) Compute the different payoffs.
 
-Redefine the probability using the continous function instead of the discrete variable.
+Define the risk-neutral probability and the discount factor using discrete compounding (because of the binomial model)
 
-```{r set-up function parameter continous}
+```{r set-up function parameter}
+# Need to compute the risk neutral probability under which there is no arbitrage opportunity (Fundamental Theorem of Asset Pricing)
+
 # define the one-step risk-free growth factor
 R_period <- 1 + (r*delta_t)
 # define the risk-neutral probability
 q <- (R_period-d)/(u - d)
-# define the discount factor 
+# define the discount factor (for future return)
 discount <- 1 / R_period
 
 # print recap of all value needed for the rest of the code
-cat("Daily volatility:      ", sigma_daily, "\n")
-cat("Annual volatility:     ", sigma, "\n")
-cat("Up factor u:           ", u, "\n")
-cat("Down factor d:         ", d, "\n")
-cat("One-step growth R_period:", R_period, "\n")
-cat("Risk-neutral prob. q:  ", q, "\n")
-cat("Discount factor:       ", discount, "\n")
+cat("Daily volatility:         ", sigma_daily, "\n")
+cat("Annual volatility:        ", sigma, "\n")
+cat("Up factor u:              ", u, "\n")
+cat("Down factor d:            ", d, "\n")
+cat("One-step growth R_period: ", R_period, "\n")
+cat("Risk-neutral prob. q:     ", q, "\n")
+cat("Discount factor:          ", discount, "\n")
+
 ```
 
 ```{r compute the payoff}
@@ -364,13 +369,28 @@ head(states)
 ```
 
 ## i.v) Weighted Outcome under risk-neutral probability
-Use the weighted probability under the no-arbitrage opportunity. The risk-neutral probability is chosen in order for the expected one-step stock price grows at the risk-free rate (no-arbitrage).
+Use the weighted probability under the no-arbitrage opportunity assumption. 
 
 
 ## v) Estimate the pricing option: (use backward induction)
+```{r option value using backward induction}
+# we have each terminal payoff
+values <- states$payoff 
 
+# in order to use backward induction we need to start from maturity and then loops through each eateriation until we reach time 0 (starting point)
+for (step in n:1) {
+  half   <- length(values) / 2
+  v_up   <- values[1:half]
+  v_down <- values[(half + 1):length(values)]
+  values <- discount * (q * v_up + (1 - q) * v_down)
+}
 
-```{r option value}
+V0_b<- values
+cat(" Option price at t = 0 with backward induction: $", round(V0_b,4))
+
+```
+
+```{r option value using direct forward calculation}
 # find the number of up moves for each path
 states$up_moves <- round((log(states$S / S0) - n * log(d)) / (log(u) - log(d))) 
 
@@ -381,31 +401,150 @@ states$rn_weight <- q^states$up_moves * (1 - q)^(n - states$up_moves)
 expected_payoff <- sum(states$rn_weight * states$payoff)
 
 # Discount the expected payoff back to time 0
-V0 <- exp(-r * T) * expected_payoff
+V0_f<- discount^n * expected_payoff
 
-print(V0)
+cat(" The option price at T = 0 with direct forward calculation: $", round(V0_f,4))
 
-# Payoff plot
-states |>
-  group_by(up_moves) |>
-  summarise(
-    terminal_price = mean(S),
-    average_payoff = mean(payoff),
-    .groups = "drop"
-  ) |>
-  ggplot(aes(x = terminal_price, y = average_payoff)) +
-  geom_col(fill = "grey40", alpha = 0.85) +
-  geom_vline(xintercept = S0, color = "red", linetype = "dashed") +
-  labs(
-    title = "Average Payoff by Terminal Stock Price",
-    subtitle = "Floating-strike Asian call option",
-    x = "Terminal stock price",
-    y = "Average payoff"
-  ) +
-  scale_x_continuous(labels = scales::dollar_format()) +
-  scale_y_continuous(labels = scales::dollar_format()) +
-  theme_minimal()
 ```
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+## vi) Robustness check:
+
+The annualised volatility sigma is the only parameter in our model that we had to estimated from the data rather than simply taking it from the assignment. We compute it as sigma = sigma_daily x sqrt(250), where sigma_daily is the sample standard deviation of the daily log returns over the period 2020-2026. However, this raises a natural question: would our baseline price of 13.89 change significantly if we had chosen a different historical window to estimate sigma?
+
+To answer this, we re-estimate sigma over four alternative sub-periods and re-price the option each time, keeping all other parameters fixed at their baseline values. The four windows are the full 2020-2026 sample, a post-COVID window starting in 2021, a recent three-year window from 2023 to 2026, and the most recent twelve months. The results show that the baseline price is sensitive to whether we include the COVID period of 2020 or not. Excluding it brings sigma down from 0.313 to as low as 0.253, and the option price falls from 13.89 to 11.30. This makes intuitive sense: a lower volatility means a narrower binomial tree, which reduces the expected payoff E_Q[max(Sn - Sn_bar, 0)] and therefore the price. On the other hand, when we use only the most recent twelve months, sigma recovers to 0.309 and the price returns to 13.70, close to our baseline. This is consistent with the elevated market uncertainty observed in early 2026.
+
+We therefore conclude that our baseline price is robust to recent market conditions but sensitive to the inclusion of the COVID volatility spike of 2020. The key modelling assumption being tested here is whether the 2020-2026 window is representative of the volatility that will prevail over the next six months, and there is no objectively correct answer to that question.
+
+```{r robustness check}
+
+raw <- data
+raw$AAPL <- raw$Price
+
+# Helper: estimate σ from a data sub-window and re-price
+# Uses the same forward enumeration + risk-neutral pricing as Tasks ii/iii/v
+reprice_window <- function(data_subset, S0, r, T, n, p = 0.5) {
+  log_ret   <- diff(log(data_subset$AAPL))
+  sig_daily <- sd(log_ret, na.rm = TRUE)
+  sig_ann   <- sig_daily * sqrt(250)
+
+  # Recompute tree parameters with the new sigma
+  dt    <- T / n
+  u_new <- exp( sig_ann * sqrt(dt))
+  d_new <- exp(-sig_ann * sqrt(dt))
+  R_new <- exp(r * dt)
+  q_new <- (R_new - d_new) / (u_new - d_new)
+
+  # Forward enumeration of all 2^n paths (same logic as Task ii)
+  states <- data.frame(S = S0, C = S0, weight = 1.0)
+  for (step in 1:n) {
+    up   <- data.frame(S      = states$S * u_new,
+                       C      = states$C + states$S * u_new,
+                       weight = states$weight * p)
+    down <- data.frame(S      = states$S * d_new,
+                       C      = states$C + states$S * d_new,
+                       weight = states$weight * (1 - p))
+    states <- rbind(up, down)
+  }
+
+  # Payoff and risk-neutral pricing (same logic as Task v)
+  states$S_bar    <- states$C / (n + 1)
+  states$payoff   <- pmax(states$S - states$S_bar, 0)
+  states$up_moves <- round((log(states$S / S0) - n * log(d_new)) /
+                             (log(u_new) - log(d_new)))
+  states$rn_weight <- q_new^states$up_moves * (1 - q_new)^(n - states$up_moves)
+
+  price <- exp(-r * T) * sum(states$rn_weight * states$payoff)
+  list(sigma_daily = sig_daily, sigma_ann = sig_ann, price = price)
+}
+
+# Define the four estimation windows
+windows <- list(
+  list(start = "2020-01-01", end = "2026-12-31", label = "Full window (2020-2026)"),
+  list(start = "2021-01-01", end = "2026-12-31", label = "Post-COVID (2021-2026)"),
+  list(start = "2023-01-01", end = "2026-12-31", label = "Recent 3 years (2023-2026)"),
+  list(start = "2025-04-01", end = "2026-12-31", label = "Recent 12 months")
+)
+
+# Run for each window
+window_results <- data.frame(
+  Window       = character(),
+  N_obs        = integer(),
+  sigma_daily  = numeric(),
+  sigma_ann    = numeric(),
+  option_price = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (w in windows) {
+  sub <- subset(raw, Date >= as.Date(w$start) & Date <= as.Date(w$end))
+  sub <- sub[order(sub$Date), ]
+  res <- reprice_window(sub, S0, r, T, n)
+  window_results <- rbind(window_results, data.frame(
+    Window       = w$label,
+    N_obs        = nrow(sub) - 1,
+    sigma_daily  = res$sigma_daily,
+    sigma_ann    = res$sigma_ann,
+    option_price = res$price,
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Print results
+print(window_results)
+
+cat(sprintf("\nσ range:     [%.4f, %.4f]  (Δ = %.4f)\n",
+            min(window_results$sigma_ann),
+            max(window_results$sigma_ann),
+            diff(range(window_results$sigma_ann))))
+cat(sprintf("Price range: [%.4f, %.4f]  (Δ = %.4f USD)\n",
+            min(window_results$option_price),
+            max(window_results$option_price),
+            diff(range(window_results$option_price))))
+
+# Plot
+ggplot(window_results, aes(x = option_price, y = Window)) +
+  geom_segment(aes(x    = min(option_price) * 0.99,
+                   xend = option_price,
+                   y    = Window, yend = Window),
+               colour = "grey70", linewidth = 0.6) +
+  geom_point(aes(colour = sigma_ann), size = 5) +
+  geom_text(aes(label = sprintf("$%.2f  (sigma = %.3f)",
+                                option_price, sigma_ann)),
+            hjust = -0.15, vjust = -0.8, size = 3.2) +
+  scale_colour_gradient(low = "#2166ac", high = "#d6604d",
+                        name = "sigma (annual)",
+                        breaks = c(0.26, 0.28, 0.30, 0.313),
+                        labels = c("0.260", "0.280", "0.300", "0.313")) +
+  scale_x_continuous(
+    labels = scales::dollar_format(),
+    expand = expansion(mult = c(0.02, 0.45))
+  ) +
+  labs(
+    title    = "Option Price Sensitivity to sigma Estimation Window",
+    subtitle = paste0("Each point is V0 re-priced using sigma from a different sub-period.\n",
+                      "r = 1%, S0 = $", round(S0, 2), ", T = 0.5, n = 25."),
+    x = "Option price at t = 0 (USD)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, colour = "grey40"),
+    legend.position = "bottom",
+    legend.key.width = unit(2, "cm")
+  )
+```
 
