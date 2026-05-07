@@ -388,8 +388,103 @@ ggplot(states_sample, aes(x = S, y = payoff)) +
   theme_minimal()
 ```
 
+
+
 ## i.v) Weighted Outcome under risk-neutral probability
-Use the weighted probability under the no-arbitrage opportunity assumption. 
+
+Use the weighted probability under the no-arbitrage opportunity assumption.
+
+Until now we have determined that a stock would go up or down with the probability of $p =\frac{1}{2}$. However this probability does not excude the possibility of arbitrage where free money can be made without taking any risk. Indeed as the stock move up or down, its return should tend towards 0 on average. However in the same time, a bond could return $0.02\%$. This means that it is possible for an investor to short the stock and invest the amount received now into a bond. Then in the future, he sells the bonds, earn the $0.02\%$ return from the bonds and buy back the share. So in the case where $p = 0.5$, the bond always pays more than what the stock is expected to return which creates an arbitrage opportunity which can be exploited to generate risk-free profit.
+
+Now in order to avoid this situation and guarantee that all assets have the same expected return, one need to adjust the probability. We are thus going to use the probability $q$ under which the stock earns exactly the same amount as the risk-free rate and thus eliminate arbitrage. This is at the core of the Fundamental Assets Pricing Theory presented in Lecture 2 which defines a risk-neutral probability $q$ that serves to guarantee that the stock and the bond combinations have the same expected return that no assets dominates the others, thus resulting in an arbitrage free-market.
+
+In our case, we have an options that pays $X^u$ in the up state and $X^d$ in the down state. The idea is now to find a portfolio compose of a stock $\alpha_1$ and of a bond $beta_1$ that exaclt repliates has the same payoff as our options. This means that in the state up the portfolio $\alpha_1 \cdot S_0 \cdot u + \beta_1 \cdot (1+r) = X^u$ (note that $\alpha_1$ is the part of our initial investment we give to the stock and $\beta_1$ is the part we give to the bonds with $u$ being the effect of the increase of the stock on $S_0$ being the initial value of the stock  and $r$ being the return of the bond). Note that repriprocally, the return in the state down is  $\alpha_1 \cdot S_0 \cdot d + \beta_1 \cdot (1+r) = X^d$. 
+
+Now that both case have been define we need to search for the amount invested in the bond and in the stock $(\alpha_1, \beta_1)$. 
+
+We can rewrite the equation proprely:
+$$
+\begin{align}
+\text{up:}\qquad \alpha_1 \cdot S_0 \cdot u + \beta_1 \cdot (1+r) &= X^u \tag{1} \\
+\text{down:}\qquad \alpha_1 \cdot S_0 \cdot d + \beta_1 \cdot (1+r) &= X^d \tag{2}
+\end{align}
+$$
+In order to find $\alpha_1$ we subtract equation 2 from equation 1 and we obtain (with the bonds part cancelling out):
+$$
+\alpha_1 \cdot S_0 \cdot u - \alpha_1 \cdot S_0 \cdot d = X^u - X^d
+$$
+It is possible to simplify the equation by grouping the value of the stock $S_0$ in $t=0$.
+$$
+\alpha_1 \cdot S_0 (u - d) = X^u - X^d
+$$
+Before simply isolating $\alpha_1$ and finally obtaining:
+$$
+\boxed{\alpha_1 = \frac{X^u - X^d}{S_0(u - d)}} \tag{3}
+$$
+The same operation can be conducted for the share invested in the bonds as we now plug equation 3 (our $\alpha_1$) into the initial equation 1.
+$$
+\begin{aligned}
+\frac{X^u - X^d}{S_0(u - d)} \cdot S_0 \cdot d + \beta_1(1+r) \quad = \quad X^d \\ \frac{{X^u - X^d}\cdot S_0 \cdot d}{S_0(u - d)} + \beta_1(1+r)\quad = \quad X^d
+\end{aligned}
+$$
+One can see that the $S_0$ simplifies and that we obtain:
+$$
+\frac{(X^u - X^d) \cdot d}{u - d} + \beta_1(1+r) = X^d
+$$
+We then isolate the share invested in $\beta_1$:
+$$
+
+\beta_1(1+r) \quad= \quad X^d - \frac{(X^u - X^d) \cdot d}{u - d}\\
+\beta_1(1+r) \quad= \quad \frac{X^d(u - d) - (X^u - X^d) \cdot d}{u - d}
+
+$$
+In order to simplify we expand the numerator and $X^d \cdot d$ cancels out.
+$$
+= \frac{X^d \cdot u - X^d \cdot d - X^u \cdot d + X^d \cdot d}{u - d}
+= \frac{X^d \cdot u - X^u \cdot d}{u - d}
+$$
+We can divide it by $(1+r)$ and we obtain $beta_1$.
+
+$$
+\boxed{\beta_1 = \frac{1}{1+r} \cdot \frac{X^d \cdot u - X^u \cdot d}{u - d}}
+$$
+
+
+```{r difference between both probability q and p}
+# plot the distribution of terminal value under both probability in order to compare them
+j_vals   <- 0:n
+prices_T <- S0 * u^j_vals * d^(n - j_vals)
+
+# Physical distribution (p = 0.5)
+probs_p <- choose(n, j_vals) * p^j_vals * (1 - p)^(n - j_vals)
+
+# Risk-neutral distribution (q)
+probs_q <- choose(n, j_vals) * q^j_vals * (1 - q)^(n - j_vals)
+
+dist_df <- data.frame(
+  price = rep(prices_T, 2),
+  prob  = c(probs_p, probs_q),
+  measure = rep(c("Physical (p = 0.5)", "Risk-neutral (q)"), each = n + 1)
+)
+
+ggplot(dist_df, aes(x = price, y = prob, fill = measure)) +
+  geom_col(position = "dodge", alpha = 0.7, width = diff(range(prices_T)) / 35) +
+  geom_vline(xintercept = S0, linetype = "dashed", color = "black", linewidth = 0.5) +
+  annotate("text", x = S0 + 5, y = max(c(probs_p, probs_q)) * 0.95,
+           label = paste0("S0 = $", round(S0, 2)),
+           size = 3.5, hjust = 0) +
+  scale_fill_manual(values = c("Physical (p = 0.5)" = "grey40",
+                                "Risk-neutral (q)" = "red")) +
+  labs(
+    title    = "Terminal Price Distribution: Physical vs Risk-Neutral",
+    subtitle = paste0("q = ", round(q, 4), " vs p = 0.5 — risk-neutral shifts mass rightward"),
+    x = expression(Terminal~stock~price~S[n]),
+    y = "Probability",
+    fill = "Measure"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
 
 
 ## v) Estimate the pricing option: (use backward induction)
@@ -432,8 +527,6 @@ V0_f<- discount^n * expected_payoff
 cat(" The option price at T = 0 with direct forward calculation: $", round(V0_f,4))
 
 ```
-
-
 
 
 
