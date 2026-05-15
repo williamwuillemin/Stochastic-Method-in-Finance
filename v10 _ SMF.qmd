@@ -1,0 +1,649 @@
+---
+title: "Stochastic Method in Finance"
+subtitle: "Assignement: Exotic Options"
+author: "Antoine Marie - 24-613-762"
+format: 
+  html: 
+    embed-resources: true  
+    self-contained: true
+    self-contained-math: true
+    math-method: mathjax
+    
+highlight-style: dracula
+editor: 
+  markdown: 
+    wrap: 72
+---
+```{r setup, echo = FALSE, eval = TRUE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = TRUE, eval = TRUE)
+```
+
+```{r - Data Preparation}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+```
+```{r - Download Apple Data}
+getwd()
+setwd("C:/William/University_GitHub/Stochastic Method in Finance/Assignment")
+data <- read_excel("AAPL.xlsx")
+```
+
+```{r}
+# Convert date to Date format
+data$Date <- as.Date(data$Date)
+
+# Rename AAPL.US to Price
+colnames(data)[colnames(data) == "AAPL.US"] <- "Price"
+
+# Convert Price to numeric (in case it was read as character)
+data$Price <- as.numeric(data$Price)
+
+# Sort ascending (oldest first)
+data <- data[order(data$Date), ]
+
+# Filter to 2020 onwards
+data <- data[data$Date >= as.Date("2020-01-01"), ]
+
+# Drop unnecessary columns (keep only Date and Price)
+data <- data[, c("Date", "Price")]
+
+# Remove any rows with NA
+data <- na.omit(data)
+```
+```{r}
+cat("Date range:  ", format(min(data$Date)), "to", format(max(data$Date)), "\n")
+cat("Observations:", nrow(data), "\n")
+cat("Date class:  ", class(data$Date), "\n")
+cat("Price class: ", class(data$Price), "\n")
+cat("Any NAs:     ", anyNA(data), "\n")
+
+head(data)
+tail(data)
+```
+```{r}
+n <- 25           # number of periods
+r <- 0.01         # interest rate per annum
+S0 <- 267.6100    # Close value on the 27th April 2026 
+p <- 0.5          # probability of a up or down
+T <- 6/12         # anualise the maturity
+delta_t <- T/n    # go from discrete to continuous Random walk to Brownian motion
+
+```
+```{r}
+#Daily log returns 
+returns <- diff(log(data$Price)) #Calculate the daily log returns, slide 
+
+sigma_daily <- sd(returns, na.rm = TRUE) #Calculate the standard deviation, remove na values
+
+sigma <- sigma_daily * sqrt(250) #calculate the annualized volatility, given in assignment
+
+#Up and down factors 
+u <- exp(sigma * sqrt(delta_t))     #page 2
+d <- exp(-sigma * sqrt(delta_t))
+
+```
+```{r}
+# Initialize price tree
+stock_tree <- matrix(0, nrow = n + 1, ncol = n + 1)
+
+for (i in 0:n) {        # i = time step
+  for (j in 0:i) {      # j = number of up moves
+    stock_tree[i - j + 1, i + 1] <- S0 * u^j * d^(i - j)
+  }
+}
+
+print(stock_tree)
+#middle node at maturity [13;25] = S0
+
+# All non-zero terminal nodes
+terminal <- stock_tree[stock_tree[, n + 1] != 0, n + 1]
+
+cat("# of terminal nodes:", length(terminal), "\n")
+cat("Maximum price:           ", max(terminal), "\n")
+cat("Minimum price:           ", min(terminal), "\n")
+cat("Middle node (~S0):       ", median(terminal), "\n")
+
+# All terminal prices
+cat("\nAll terminal prices:\n")
+print(round(terminal, 2))
+
+# Binonmial tree visual 
+tree_nodes <- data.frame()
+for (i in 0:4) {
+  for (j in 0:i) {
+    price       <- S0 * u^j * d^(i - j)
+    is_reconcile <- (i == 2 & j == 1)
+    tree_nodes  <- rbind(tree_nodes, data.frame(
+      t         = i,
+      y         = j - i/2,
+      price     = round(price, 2),
+      reconcile = is_reconcile
+    ))
+  }
+}
+
+tree_edges <- data.frame()
+for (i in 0:3) {
+  for (j in 0:i) {
+    y_current <- j - i/2
+    tree_edges <- rbind(tree_edges, data.frame(
+      x = i, xend = i + 1,
+      y = y_current, yend = (j + 1) - (i + 1)/2
+    ))
+    tree_edges <- rbind(tree_edges, data.frame(
+      x = i, xend = i + 1,
+      y = y_current, yend = j - (i + 1)/2
+    ))
+  }
+}
+
+p_tree <- ggplot() +
+  geom_segment(data = tree_edges,
+               aes(x = x, xend = xend, y = y, yend = yend),
+               color = "grey40", linewidth = 0.6) +
+  geom_point(data = tree_nodes[!tree_nodes$reconcile, ],
+             aes(x = t, y = y),
+             size = 16, color = "grey40") +
+  geom_point(data = tree_nodes[tree_nodes$reconcile, ],
+             aes(x = t, y = y),
+             size = 16, color = "red") +
+  geom_text(data = tree_nodes,
+            aes(x = t, y = y, label = paste0("$", price)),
+            color = "white", size = 2.8, fontface = "bold") +
+  annotate("text",
+           x = tree_nodes$t[tree_nodes$reconcile] + 0.12,
+           y = tree_nodes$y[tree_nodes$reconcile] - 0.42,
+           label = "S0 * u * d = S0",
+           color = "red", size = 3.2, hjust = 0) +
+  annotate("text",
+           x = 0:4, y = rep(-2.9, 5),
+           label = paste0("t = ", 0:4),
+           size = 3.2, color = "grey40") +
+  scale_x_continuous(limits = c(-0.3, 5.0)) +
+  scale_y_continuous(limits = c(-3.2, 2.6)) +
+  labs(
+    title    = "Binomial Tree — First 4 Periods",
+    subtitle = paste0("S0 = $", round(S0, 2),
+                      "   u = ", round(u, 4),
+                      "   d = ", round(d, 4),
+                      "   p = ", p),
+    caption  = "Red node: recombination S0 * u * d = S0"
+  ) +
+  theme_void() +
+  theme(
+    plot.title    = element_text(size = 14, face = "bold",
+                                 hjust = 0.5, margin = margin(b = 5)),
+    plot.subtitle = element_text(size = 10, hjust = 0.5,
+                                 color = "grey40", margin = margin(b = 15)),
+    plot.caption  = element_text(size = 9, hjust = 0.5,
+                                 color = "red", margin = margin(t = 10)),
+    plot.margin   = margin(15, 15, 15, 15)
+  )
+
+print(p_tree)
+```
+```{r}
+# Using forward induction to have cumulative sum C_t along each path, chapter 2 slide 28
+#2^25 node to compute = way too much for R -> 
+
+states <- data.frame(
+  S      = S0,
+  C      = S0,
+  weight = 1.0      # physical probability weight (p = 0.5)
+)
+
+for (step in 1:n) {
+  up <- data.frame(
+    S      = states$S * u,
+    C      = states$C + states$S * u,
+    weight = states$weight * p
+  )
+  down <- data.frame(
+    S      = states$S * d,
+    C      = states$C + states$S * d,
+    weight = states$weight * (1 - p)
+  )
+  states <- rbind(up, down)
+}
+
+# Compute arithmetic average for each terminal path
+states$S_bar <- states$C / (n + 1)
+
+cat("\n=== Task (ii): Arithmetic Average Summary ===\n")
+cat("Number of terminal paths:", nrow(states), "\n")
+cat("Max average price:  $", round(max(states$S_bar), 4), "\n")
+cat("Min average price:  $", round(min(states$S_bar), 4), "\n")
+cat("Mean of averages:   $", round(mean(states$S_bar), 4), "\n")
+
+averages_list <- sort(states$S_bar, decreasing = TRUE)
+
+
+# Plot 2: Distribution of Terminal prices, Using binomial formula with p = 0.5 (physical probability)
+
+j_vals   <- 0:n
+prices_T <- S0 * u^j_vals * d^(n - j_vals)
+probs_p  <- choose(n, j_vals) * (0.5)^n
+
+terminal_df <- data.frame(
+  price = prices_T,
+  prob  = probs_p
+)
+
+p_dist <- ggplot(terminal_df, aes(x = price, y = prob)) +
+  geom_col(fill = "grey40", alpha = 0.85, width = diff(range(prices_T))/30) +
+  geom_vline(xintercept = S0,
+             color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x = S0 + diff(range(prices_T)) * 0.03,
+           y = max(probs_p) * 0.93,
+           label = paste0("S0 = $", round(S0, 2)),
+           color = "red", size = 3.5, hjust = 0) +
+  labs(
+    title    = "Distribution of Terminal Stock Prices at t = n",
+    subtitle = paste0("n = ", n, " periods   |  Physical Probability p = 0.5"),
+    x        = "Terminal Stock Price ($)",
+    y        = "Probability"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 0.1)) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle    = element_text(size = 10, hjust = 0.5, color = "grey40"),
+    axis.title       = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_dist)
+
+# PLOT 3: DISTRIBUTION OF TERMINAL AVERAGES ─────────────
+
+p_avg <- ggplot(states, aes(x = S_bar, weight = weight)) +
+  geom_histogram(bins = 50, fill = "grey40", alpha = 0.85, color = "white") +
+  geom_vline(xintercept = S0,
+             color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x = S0 + 1, y = Inf, vjust = 2,
+           label = paste0("S\u2080 = $", round(S0, 2)),
+           color = "red", size = 3.5, hjust = 0) +
+  labs(
+    title    = "Distribution of Arithmetic Averages at Maturity",
+    subtitle = paste0(nrow(states), " paths   |   p = 0.5"),
+    x        = "Arithmetic Average Price ($)",
+    y        = "Number of Paths"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle    = element_text(size = 10, hjust = 0.5, color = "grey40"),
+    axis.title       = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_avg)
+```
+```{r set-up function parameter}
+# Need to compute the risk neutral probability under which there is no arbitrage opportunity (Fundamental Theorem of Asset Pricing)
+
+# define the one-step risk-free growth factor
+R_period <- 1 + (r*delta_t)
+# define the risk-neutral probability
+q <- (R_period-d)/(u - d)
+# define the discount factor (for future return)
+discount <- 1 / R_period
+
+# print recap of all value needed for the rest of the code
+cat("Daily volatility:         ", sigma_daily, "\n")
+cat("Annual volatility:        ", sigma, "\n")
+cat("Up factor u:              ", u, "\n")
+cat("Down factor d:            ", d, "\n")
+cat("One-step growth R_period: ", R_period, "\n")
+cat("Risk-neutral prob. q:     ", q, "\n")
+cat("Discount factor:          ", discount, "\n")
+
+```
+```{r compute the payoff}
+# we need to compute the payoff at maturity for every path.
+states$payoff <- pmax(states$S - states$S_bar, 0)
+
+# print the recap of the payoff ___________________________
+cat("\n Floating-Strike Asian Call Payoff\n")
+cat("Number of terminal paths: ", nrow(states), "\n")
+cat("Minimum payoff:          $", round(min(states$payoff), 4), "\n")
+cat("Maximum payoff:          $", round(max(states$payoff), 4), "\n")
+cat("Mean payoff:             $", round(mean(states$payoff), 4), "\n")
+cat("Median payoff:           $", round(median(states$payoff), 4), "\n")
+cat("Share positive payoffs:   ", round(mean(states$payoff > 0) * 100, 2), "%\n")
+
+# Plot the distribution of the payoff at maturity
+p_payoff <- ggplot(states, aes(x = payoff)) +
+  geom_histogram(bins = 50, fill = "grey40", color = "white", alpha = 0.8) +
+  geom_vline(xintercept = mean(states$payoff),
+             color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x = mean(states$payoff) + 1,
+           y = Inf, vjust = 2,
+           label = paste0("Mean = $", round(mean(states$payoff), 2)),
+           color = "red", size = 3.5, hjust = 0) +
+  labs(
+    title = "Distribution of Potential Payoffs at Maturity",
+    subtitle = "Unweighted across all terminal paths",
+    x = "Payoff at maturity",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+p_payoff
+
+ggsave("figures/payoff_distribution.pdf", plot = p_payoff, 
+       width = 7, height = 4)
+
+# Jitter plot in order to showcase how the terminal payoff of the option is related to the average price of the stock of AAPL
+
+set.seed(42)
+states_sample <- states[sample(nrow(states), 80000), ]
+
+payoff_vs_terminal <- ggplot(states_sample, aes(x = S, y = payoff)) +
+  geom_jitter(alpha = 0.03, size = 0.3, color = "red",
+              width = 5, height = 0) +
+  labs(
+    title    = "Payoff vs Terminal Stock Price",
+    subtitle = "Horizontal spread reveals path dependence:\n same Sn, different averages",
+    x = expression(Terminal~stock~price~S[n]),
+    y = "Payoff ($)"
+  ) +
+  theme_minimal()
+
+payoff_vs_terminal
+
+ggsave("figures/payoff_vs_terminal.pdf", plot = payoff_vs_terminal, 
+       width = 7, height = 4)
+```
+```{r difference between both probability q and p}
+# plot the distribution of terminal value under both probability in order to compare them
+j_vals   <- 0:n
+prices_T <- S0 * u^j_vals * d^(n - j_vals)
+
+# Physical distribution (p = 0.5)
+probs_p <- choose(n, j_vals) * p^j_vals * (1 - p)^(n - j_vals)
+
+# Risk-neutral distribution (q)
+probs_q <- choose(n, j_vals) * q^j_vals * (1 - q)^(n - j_vals)
+
+dist_df <- data.frame(
+  price = rep(prices_T, 2),
+  prob  = c(probs_p, probs_q),
+  measure = rep(c("Physical (p = 0.5)", "Risk-neutral (q)"), each = n + 1)
+)
+
+ggplot(dist_df, aes(x = price, y = prob, fill = measure)) +
+  geom_col(position = "dodge", alpha = 0.7, width = diff(range(prices_T)) / 35) +
+  geom_vline(xintercept = S0, linetype = "dashed", color = "black", linewidth = 0.5) +
+  annotate("text", x = S0 + 5, y = max(c(probs_p, probs_q)) * 0.95,
+           label = paste0("S0 = $", round(S0, 2)),
+           size = 3.5, hjust = 0) +
+  scale_fill_manual(values = c("Physical (p = 0.5)" = "grey40",
+                                "Risk-neutral (q)" = "red")) +
+  labs(
+    title    = "Terminal Price Distribution: Physical vs Risk-Neutral",
+    subtitle = paste0("q = ", round(q, 4), " vs p = 0.5 — risk-neutral shifts mass rightward"),
+    x = expression(Terminal~stock~price~S[n]),
+    y = "Probability",
+    fill = "Measure"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+```{r option value using backward induction}
+# we have each terminal payoff
+values <- states$payoff 
+
+# in order to use backward induction: we need to start from the payoff at maturity and then loops through each iteration until we reach time 0 (starting point)
+
+for (step in n:1) {
+  half   <- length(values) / 2
+  # split the tree in two parts (the part above is all the value that ended with an up and the part below is all the down)
+  v_up   <- values[1:half]
+  v_down <- values[(half + 1):length(values)]
+  values <- discount * (q * v_up + (1 - q) * v_down)
+  # we compute the probability of having the up and the down before discounting them by the period factor
+  # Loop through all the iteration of the tree in order to reach the starting point (unique V0)
+}
+
+V0_b<- values
+cat(" Option price at t = 0 with backward induction: $", round(V0_b,4))
+
+```
+```{r option value using direct forward calculation}
+# Control if both model gives the same value:
+
+# find the number of up moves for each path
+states$up_moves <- round((log(states$S / S0) - n * log(d)) / (log(u) - log(d))) 
+
+# Risk-neutral probability of each individual path
+states$rn_weight <- q^states$up_moves * (1 - q)^(n - states$up_moves)
+
+# Expected payoff under the risk-neutral measure
+expected_payoff <- sum(states$rn_weight * states$payoff)
+
+# Discount the expected payoff back to time 0
+V0_f<- discount^n * expected_payoff
+
+cat(" The option price at T = 0 with direct forward calculation: $", round(V0_f,4))
+
+```
+```{r robustness check}
+
+raw <- data
+raw$AAPL <- raw$Price
+
+# Helper: estimate σ from a data sub-window and re-price
+# Uses the same forward enumeration + risk-neutral pricing as Tasks ii/iii/v
+reprice_window <- function(data_subset, S0, r, T, n, p = 0.5) {
+  log_ret   <- diff(log(data_subset$AAPL))
+  sig_daily <- sd(log_ret, na.rm = TRUE)
+  sig_ann   <- sig_daily * sqrt(250)
+
+  # Recompute tree parameters with the new sigma
+  dt    <- T / n
+  u_new <- exp( sig_ann * sqrt(dt))
+  d_new <- exp(-sig_ann * sqrt(dt))
+  R_new <- exp(r * dt)
+  q_new <- (R_new - d_new) / (u_new - d_new)
+
+  # Forward enumeration of all 2^n paths (same logic as Task ii)
+  states <- data.frame(S = S0, C = S0, weight = 1.0)
+  for (step in 1:n) {
+    up   <- data.frame(S      = states$S * u_new,
+                       C      = states$C + states$S * u_new,
+                       weight = states$weight * p)
+    down <- data.frame(S      = states$S * d_new,
+                       C      = states$C + states$S * d_new,
+                       weight = states$weight * (1 - p))
+    states <- rbind(up, down)
+  }
+
+  # Payoff and risk-neutral pricing (same logic as Task v)
+  states$S_bar    <- states$C / (n + 1)
+  states$payoff   <- pmax(states$S - states$S_bar, 0)
+  states$up_moves <- round((log(states$S / S0) - n * log(d_new)) /
+                             (log(u_new) - log(d_new)))
+  states$rn_weight <- q_new^states$up_moves * (1 - q_new)^(n - states$up_moves)
+
+  price <- exp(-r * T) * sum(states$rn_weight * states$payoff)
+  list(sigma_daily = sig_daily, sigma_ann = sig_ann, price = price)
+}
+
+# Define the four estimation windows
+windows <- list(
+  list(start = "2020-01-01", end = "2026-12-31", label = "Full window (2020-2026)"),
+  list(start = "2021-01-01", end = "2026-12-31", label = "Post-COVID (2021-2026)"),
+  list(start = "2023-01-01", end = "2026-12-31", label = "Recent 3 years (2023-2026)"),
+  list(start = "2025-04-01", end = "2026-12-31", label = "Recent 12 months")
+)
+
+# Run for each window
+window_results <- data.frame(
+  Window       = character(),
+  N_obs        = integer(),
+  sigma_daily  = numeric(),
+  sigma_ann    = numeric(),
+  option_price = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (w in windows) {
+  sub <- subset(raw, Date >= as.Date(w$start) & Date <= as.Date(w$end))
+  sub <- sub[order(sub$Date), ]
+  res <- reprice_window(sub, S0, r, T, n)
+  window_results <- rbind(window_results, data.frame(
+    Window       = w$label,
+    N_obs        = nrow(sub) - 1,
+    sigma_daily  = res$sigma_daily,
+    sigma_ann    = res$sigma_ann,
+    option_price = res$price,
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Print results
+print(window_results)
+
+cat(sprintf("\nσ range:     [%.4f, %.4f]  (Δ = %.4f)\n",
+            min(window_results$sigma_ann),
+            max(window_results$sigma_ann),
+            diff(range(window_results$sigma_ann))))
+cat(sprintf("Price range: [%.4f, %.4f]  (Δ = %.4f USD)\n",
+            min(window_results$option_price),
+            max(window_results$option_price),
+            diff(range(window_results$option_price))))
+
+# Plot
+ggplot(window_results, aes(x = option_price, y = Window)) +
+  geom_segment(aes(x    = min(option_price) * 0.99,
+                   xend = option_price,
+                   y    = Window, yend = Window),
+               colour = "grey70", linewidth = 0.6) +
+  geom_point(aes(colour = sigma_ann), size = 5) +
+  geom_text(aes(label = sprintf("$%.2f  (sigma = %.3f)",
+                                option_price, sigma_ann)),
+            hjust = -0.15, vjust = -0.8, size = 3.2) +
+  scale_colour_gradient(low = "#2166ac", high = "#d6604d",
+                        name = "sigma (annual)",
+                        breaks = c(0.26, 0.28, 0.30, 0.313),
+                        labels = c("0.260", "0.280", "0.300", "0.313")) +
+  scale_x_continuous(
+    labels = scales::dollar_format(),
+    expand = expansion(mult = c(0.02, 0.45))
+  ) +
+  labs(
+    title    = "Option Price Sensitivity to sigma Estimation Window",
+    subtitle = paste0("Each point is V0 re-priced using sigma from a different sub-period.\n",
+                      "r = 1%, S0 = $", round(S0, 2), ", T = 0.5, n = 25."),
+    x = "Option price at t = 0 (USD)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title    = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, colour = "grey40"),
+    legend.position = "bottom",
+    legend.key.width = unit(2, "cm")
+  )
+```
+```{r normal approximation}
+
+# Step 1: Analytical variance and price
+# From the derivations, we know that Var(D_n) = S0^2 * sigma^2 * (T/6) * (2n+1)/(n+1)
+
+var_Dn <- S0^2 * sigma^2 * (T / 6) * (2 * n + 1) / (n + 1)
+sd_Dn  <- sqrt(var_Dn)
+
+# As we are in continuous time, we define the discount factor as
+discount_total <- exp(-r * T)
+
+#The derivations yield the result that V0_approx = discount_total * sd_Dn / sqrt(2 * pi)
+
+V0_approx <- discount_total * sd_Dn / sqrt(2 * pi)
+
+#In this first step, we calculate the analytical variance of D_n and the option price V_0
+cat("\nTask (vii): Normal Approximation (continuous time)\n")
+cat("Var(D_n) analytical:      ",  round(var_Dn,    4), "\n")
+cat("SD(D_n)  analytical:      $", round(sd_Dn,     4), "\n")
+cat("Discount factor e^{-rT}:  ",  round(exp(-r*T), 6), "\n")
+cat("Approx. option price V0:  $", round(V0_approx, 4), "\n")
+
+# Step 2: Validate variance against empirical paths using states data frame from forward induction
+states$D_n <- states$S - states$S_bar
+
+emp_mean <- weighted.mean(states$D_n, states$weight)
+emp_var  <- sum(states$weight * (states$D_n - emp_mean)^2)
+emp_sd   <- sqrt(emp_var)
+
+cat("\nValidation against simulated paths (p = 0.5)\n")
+cat("Empirical mean  of D_n:  $", round(emp_mean, 6), "\n")
+cat("Empirical Var   of D_n:  ",  round(emp_var,  4), "\n")
+cat("Empirical SD    of D_n:  $", round(emp_sd,   4), "\n")
+cat("Analytical SD   of D_n:  $", round(sd_Dn,    4), "\n")
+cat("Relative error:           ",
+    round(abs(emp_sd - sd_Dn) / sd_Dn * 100, 4), "%\n")
+
+# Step 3: Compare all three prices
+cat("\nPrice comparison\n")
+cat("Backward induction   V0_b:      $", round(V0_b,      4), "\n")
+cat("Forward calculation  V0_f:      $", round(V0_f,      4), "\n")
+cat("Normal approximation V0_approx: $", round(V0_approx, 4), "\n")
+cat("Diff (V0_f - V0_approx):        $",
+    round(V0_f - V0_approx, 4), "\n")
+cat("Relative diff:                   ",
+    round(abs(V0_f - V0_approx) / V0_f * 100, 4), "%\n")
+
+# Step 4: Sensitivity of V0_approx to n
+n_grid <- seq(5, 100, by = 5)
+
+V0_n_grid <- exp(-r * T) *
+             S0 * sigma * sqrt(T / 6) *
+             sqrt((2 * n_grid + 1) / (n_grid + 1)) /
+             sqrt(2 * pi)
+
+#formula for V_0 when n tends to infinity
+V0_inf <- exp(-r * T) * S0 * sigma * sqrt(T / 3) / sqrt(2 * pi)
+
+sens_df <- data.frame(n = n_grid, V0 = V0_n_grid)
+
+p_sensitivity <- ggplot(sens_df, aes(x = n, y = V0)) +
+  geom_line(color = "grey30", linewidth = 0.9) +
+  geom_point(color = "grey30", size = 2) +
+  geom_point(data = data.frame(n = 25, V0 = V0_approx),
+             aes(x = n, y = V0),
+             color = "red", size = 4) +
+  geom_hline(yintercept = V0_inf,
+             linetype = "dashed", color = "grey50", linewidth = 0.7) +
+ annotate("text",
+         x = 55, y = V0_inf * 1.003,
+         label = paste0("asymptote : V0 = $", round(V0_inf, 2)),
+         color = "grey40", size = 3.2, hjust = 0.5) +
+  annotate("text",
+           x = 28, y = V0_approx * 0.993,
+           label = paste0("n = 25 : $", round(V0_approx, 2)),
+           color = "red", size = 3.2, hjust = 0) +
+  labs(
+    x = "Number of periods n",
+    y = "Approximate option price ($)"
+  ) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  theme_minimal() +
+  theme(
+    plot.title       = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle    = element_text(size = 10, hjust = 0.5, color = "grey40"),
+    axis.title       = element_text(size = 10),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_sensitivity)
+ggsave("figures/normal_approx_sensitivity_n.pdf",
+       plot = p_sensitivity, width = 7, height = 4)
+
+```
