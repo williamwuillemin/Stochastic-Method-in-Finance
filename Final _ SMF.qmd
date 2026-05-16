@@ -562,10 +562,10 @@ dist_df <- data.frame(
   measure = rep(c("Physical (p = 0.5)", "Risk-neutral (q)"), each = n + 1)
 )
 
-ggplot(dist_df, aes(x = price, y = prob, fill = measure)) +
+probability_change7 <- ggplot(dist_df, aes(x = price, y = prob, fill = measure)) +
   geom_col(position = "dodge", alpha = 0.7, width = diff(range(prices_T)) / 35) +
   geom_vline(xintercept = S0, linetype = "dashed", color = "black", linewidth = 0.5) +
-  annotate("text", x = S0 + 5, y = max(c(probs_p, probs_q)) * 0.95,
+  annotate("text", x = S0 + 30, y = max(c(probs_p, probs_q)) * 0.95,
            label = paste0("S0 = $", round(S0, 2)),
            size = 3.5, hjust = 0) +
   scale_fill_manual(values = c("Physical (p = 0.5)" = "grey40",
@@ -578,8 +578,58 @@ ggplot(dist_df, aes(x = price, y = prob, fill = measure)) +
     fill = "Measure"
   ) +
   theme_minimal() +
-  theme(legend.position = "bottom")
+  theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      legend.position = "bottom")
+
+ggsave("probability_change7.pdf", width = 8, height = 5)
+probability_change7
 ```
+
+```{r - change in graphs}
+j_vals   <- 0:n
+prices_T <- S0 * u^j_vals * d^(n - j_vals)
+probs_p  <- choose(n, j_vals) * p^j_vals * (1 - p)^(n - j_vals)
+probs_q  <- choose(n, j_vals) * q^j_vals * (1 - q)^(n - j_vals)
+
+dist_df <- data.frame(
+  price   = rep(round(prices_T, 2), 2),
+  prob    = c(probs_p, probs_q),
+  measure = rep(c("Physical (p = 0.5)", "Risk-neutral (q)"), each = n + 1)
+)
+
+probability_change7 <- ggplot(dist_df, aes(x = factor(price), y = prob, fill = measure)) +
+  geom_col(position = "dodge", alpha = 0.7) +
+  geom_vline(xintercept = which.min(abs(prices_T - S0)),
+             linetype = "dashed", color = "black", linewidth = 0.5) +
+  annotate("text",
+           x = which.min(abs(prices_T - S0)) + 0.5,
+           y = max(c(probs_p, probs_q)) * 1.05,
+           label = paste0("S0 = $", round(S0, 2)),
+           size = 3.5, hjust = 0, fontface = "bold") +
+  scale_fill_manual(values = c("Physical (p = 0.5)" = "grey40",
+                                "Risk-neutral (q)" = "darkblue")) +
+  labs(
+    title    = "Terminal Price Distribution: Physical vs Risk-Neutral",
+    subtitle = paste0("q = ", round(q, 4), " vs p = 0.5 — risk-neutral shifts mass rightward"),
+    x = expression(Terminal~stock~price~S[n]),
+    y = "Probability",
+    fill = "Measure"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title    = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
+  )
+
+probability_change7
+ggsave("probability_change7.pdf", width = 8, height = 5)
+```
+
+
 
 
 ## v) Estimate the pricing option: (use backward induction)
